@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkinSense — Deteksi Jenis Kulit Wajah</title>
+<meta name="description" content="Deteksi jenis kulit wajah (berminyak, kering, normal) dengan custom CNN dan dapatkan rekomendasi skincare.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='15' fill='%232f6b55'/><path d='M16 7c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11z' fill='%23f7f3ee'/></svg>">
+<style>
+:root{
+  --bg:#f6f2ec; --surface:#fffdfa; --surface-2:#f1ebe3; --ink:#2a2420; --muted:#776b61; --line:#e4dbd0;
+  --accent:#2f6b55; --accent-ink:#ffffff; --accent-soft:#e3efe9; --warn:#a8641a; --warn-soft:#fbf0e1; --danger:#b23a2e; --danger-soft:#fbe9e6;
+  --oily:#d29a2f; --dry:#c0674a; --normal:#3f8a66; --other:#7d7a9c;
+  --radius:16px; --shadow:0 1px 2px rgba(60,40,20,.06),0 8px 24px rgba(60,40,20,.06);
+  --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:var(--font);background:var(--bg);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+button{font:inherit;cursor:pointer}
+.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* header */
+header{padding:22px 0 8px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:12px}
+.brand h1{font-size:22px;margin:0;letter-spacing:-.01em}
+.brand p{margin:0;color:var(--muted);font-size:13.5px}
+.status{display:inline-flex;align-items:center;gap:8px;font-size:13px;padding:7px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--line);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:#bbb}
+.status.loading .dot{background:var(--warn);animation:pulse 1.2s infinite}
+.status.ready .dot{background:var(--normal)}
+.status.error .dot{background:var(--danger)}
+@keyframes pulse{50%{opacity:.3}}
+
+.hero{padding:26px 0 22px}
+.hero h2{font-size:clamp(26px,4vw,38px);line-height:1.15;margin:0 0 10px;letter-spacing:-.02em;max-width:720px}
+.hero h2 em{font-style:normal;color:var(--accent)}
+.hero p{margin:0;color:var(--muted);max-width:640px;font-size:16px}
+.banner{display:none;margin:0 0 18px;padding:12px 16px;border-radius:12px;background:var(--danger-soft);color:var(--danger);font-size:14px;border:1px solid #f0c9c2}
+.banner.show{display:block}
+.banner code{background:rgba(0,0,0,.05);padding:1px 5px;border-radius:5px}
+
+/* layout */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:22px}
+.card h3{margin:0 0 14px;font-size:16px;display:flex;align-items:center;gap:10px}
+.step{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-size:12.5px;font-weight:700}
+
+/* tabs */
+.tabs{display:inline-flex;background:var(--surface-2);border-radius:12px;padding:4px;margin-bottom:14px}
+.tab{border:0;background:transparent;padding:8px 16px;border-radius:9px;color:var(--muted);font-weight:600;font-size:14px;display:flex;align-items:center;gap:7px}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+
+/* dropzone */
+.drop{border:2px dashed #d5c8b9;border-radius:14px;background:var(--surface-2);aspect-ratio:4/3;display:grid;place-items:center;text-align:center;padding:20px;cursor:pointer;transition:.15s;position:relative;overflow:hidden}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.drop .icon{width:52px;height:52px;margin:0 auto 10px;border-radius:14px;background:var(--surface);display:grid;place-items:center;color:var(--accent)}
+.drop strong{display:block;font-size:15.5px}
+.drop span{color:var(--muted);font-size:13.5px}
+.preview{display:none;position:relative;border-radius:14px;overflow:hidden;background:#000;aspect-ratio:4/3}
+.preview img{width:100%;height:100%;object-fit:contain}
+.preview .chip{position:absolute;left:10px;bottom:10px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;padding:4px 9px;border-radius:999px;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.preview .x{position:absolute;right:10px;top:10px;border:0;background:rgba(255,255,255,.92);color:var(--ink);border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600}
+.cam{display:none;position:relative;border-radius:14px;overflow:hidden;background:#111;aspect-ratio:4/3}
+.cam video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.cam .guide{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+.cam .guide div{width:46%;aspect-ratio:3/4;border:2px dashed rgba(255,255,255,.7);border-radius:50%}
+.cam .shoot{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:62px;height:62px;border-radius:50%;border:4px solid #fff;background:rgba(255,255,255,.25)}
+.cam .shoot:hover{background:rgba(255,255,255,.45)}
+.cam .msg{position:absolute;inset:0;display:none;place-items:center;color:#eee;text-align:center;padding:24px;font-size:14px}
+
+.opts{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 14px;flex-wrap:wrap}
+.switch{display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;user-select:none}
+.switch input{appearance:none;width:40px;height:23px;border-radius:999px;background:#d8cfc4;position:relative;cursor:pointer;transition:.15s;margin:0}
+.switch input::after{content:"";position:absolute;top:3px;left:3px;width:17px;height:17px;border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch input:checked{background:var(--accent)}
+.switch input:checked::after{left:20px}
+.switch small{color:var(--muted);display:block;font-size:12px}
+.btn{border:0;border-radius:12px;padding:13px 18px;font-weight:700;font-size:15px;background:var(--accent);color:var(--accent-ink);width:100%;display:flex;align-items:center;justify-content:center;gap:9px;transition:.15s}
+.btn:hover:not(:disabled){filter:brightness(1.08)}
+.btn:disabled{background:#cfc6bb;cursor:not-allowed}
+.tips{margin:16px 0 0;padding:14px 16px;background:var(--surface-2);border-radius:12px;font-size:13px;color:var(--muted)}
+.tips b{color:var(--ink)}
+.tips ul{margin:6px 0 0;padding-left:18px}
+
+/* result */
+.empty{text-align:center;color:var(--muted);padding:40px 10px}
+.empty .big{width:72px;height:72px;margin:0 auto 14px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;color:#b9aa98}
+.loading{display:none;text-align:center;padding:50px 10px;color:var(--muted)}
+.spinner{width:44px;height:44px;border-radius:50%;border:4px solid var(--surface-2);border-top-color:var(--accent);animation:spin .8s linear infinite;margin:0 auto 14px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.result{display:none}
+.res-head{display:flex;align-items:center;gap:18px}
+.ring{position:relative;width:104px;height:104px;flex:none}
+.ring svg{transform:rotate(-90deg)}
+.ring .val{position:absolute;inset:0;display:grid;place-items:center;text-align:center;font-weight:800;font-size:22px;line-height:1}
+.ring .val small{display:block;font-size:10.5px;font-weight:600;color:var(--muted);margin-top:3px;letter-spacing:.04em}
+.res-head .eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.res-head h4{margin:2px 0 4px;font-size:26px;letter-spacing:-.01em}
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;color:#fff}
+.warn{display:none;margin-top:14px;padding:10px 13px;border-radius:10px;background:var(--warn-soft);color:var(--warn);font-size:13.5px}
+.bars{margin-top:20px;display:grid;gap:12px}
+.bar-row{display:grid;grid-template-columns:120px 1fr 56px;align-items:center;gap:10px;font-size:14px}
+.bar-row .name{font-weight:600}
+.bar{height:12px;background:var(--surface-2);border-radius:999px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;border-radius:999px;transition:width .7s cubic-bezier(.2,.8,.2,1)}
+.bar-row .pct{text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.meta span{font-size:12.5px;background:var(--surface-2);color:var(--muted);padding:5px 10px;border-radius:999px}
+.errbox{display:none;padding:14px 16px;border-radius:12px;background:var(--danger-soft);color:var(--danger);font-size:14px}
+
+/* recommendations */
+section{margin-top:28px}
+section > h3{font-size:20px;margin:0 0 4px;letter-spacing:-.01em}
+section > p.sub{margin:0 0 16px;color:var(--muted);font-size:14.5px}
+.rec{display:none}
+.rec-grid{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:16px}
+.rec-grid h5{margin:0 0 10px;font-size:14.5px;display:flex;align-items:center;gap:8px}
+.rec-grid ul{margin:0;padding:0;list-style:none;display:grid;gap:8px;font-size:14px}
+.rec-grid li{display:flex;gap:9px;align-items:flex-start}
+.rec-grid li svg{flex:none;margin-top:3px}
+.rec-grid p{margin:0;font-size:14px}
+
+/* history */
+.history{display:none}
+.hist{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px}
+.hist button{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:0;overflow:hidden;text-align:left;transition:.15s}
+.hist button:hover{border-color:var(--accent);transform:translateY(-1px)}
+.hist img{width:100%;aspect-ratio:1;object-fit:cover}
+.hist div{padding:8px 10px;font-size:12.5px}
+.hist div b{display:block;font-size:13px}
+
+/* about */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.stat small{display:block;color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.stat b{display:block;font-size:20px;margin-top:2px;letter-spacing:-.01em}
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.flow .card{padding:16px}
+.flow .n{font-size:12px;font-weight:800;color:var(--accent)}
+.flow b{display:block;margin:2px 0 4px;font-size:14.5px}
+.flow p{margin:0;font-size:13px;color:var(--muted)}
+
+footer{margin:36px 0 0;padding:22px 0 30px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+
+@media (max-width:900px){
+  .grid,.rec-grid{grid-template-columns:1fr}
+  .stats,.flow{grid-template-columns:1fr 1fr}
+}
+@media (max-width:520px){
+  .wrap{padding:0 16px}
+  .card{padding:18px}
+  .bar-row{grid-template-columns:96px 1fr 50px}
+  .res-head h4{font-size:22px}
+  .ring{width:88px;height:88px}
+  .stats,.flow{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<header class="wrap">
+  <div class="top">
+    <div class="brand">
+      <svg width="40" height="40" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15" fill="#2f6b55"/><path d="M16 7c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11z" fill="#f6f2ec"/></svg>
+      <div><h1>SkinSense</h1><p>Deteksi jenis kulit wajah · Custom CNN</p></div>
+    </div>
+    <div id="status" class="status loading" role="status"><span class="dot"></span><span id="statusText">Memuat model…</span></div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="hero">
+    <h2>Kenali jenis kulitmu: <em>berminyak, kering, atau normal</em>, cukup dari satu foto.</h2>
+    <p>Unggah atau ambil foto wajah. Model CNN yang kami latih dari nol akan mengidentifikasi jenis kulit dan memberikan rekomendasi rutinitas skincare yang sesuai.</p>
+  </div>
+
+  <div id="banner" class="banner" role="alert"></div>
+
+  <div class="grid">
+    <!-- INPUT -->
+    <div class="card">
+      <h3><span class="step">1</span> Masukkan foto wajah</h3>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true" data-mode="upload">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>Upload</button>
+        <button class="tab" role="tab" aria-selected="false" data-mode="camera">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>Kamera</button>
+      </div>
+
+      <div id="drop" class="drop" tabindex="0" role="button" aria-label="Pilih foto wajah">
+        <div>
+          <div class="icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg></div>
+          <strong>Seret foto ke sini atau klik untuk memilih</strong>
+          <span>JPG, PNG, atau WEBP · maks. 10 MB · bisa juga tempel (Ctrl+V)</span>
+        </div>
+      </div>
+      <input id="file" type="file" accept="image/jpeg,image/png,image/webp,image/bmp" class="sr">
+
+      <div id="preview" class="preview">
+        <img id="previewImg" alt="Pratinjau foto">
+        <span id="previewName" class="chip"></span>
+        <button id="clear" class="x" type="button">Ganti foto</button>
+      </div>
+
+      <div id="cam" class="cam">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="guide"><div></div></div>
+        <button id="shoot" class="shoot" type="button" aria-label="Ambil foto"></button>
+        <div id="camMsg" class="msg"></div>
+      </div>
+
+      <div class="opts">
+        <label class="switch"><input id="tta" type="checkbox" checked>
+          <span>Test-Time Augmentation<small>Rata-rata prediksi foto asli + versi cermin</small></span></label>
+      </div>
+      <button id="analyze" class="btn" type="button" disabled>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <span id="analyzeText">Analisis Kulit</span></button>
+
+      <div class="tips"><b>Tips foto agar hasil akurat</b>
+        <ul><li>Wajah bersih tanpa makeup atau filter</li><li>Cahaya alami yang merata, hindari backlight</li><li>Wajah memenuhi sebagian besar foto, menghadap kamera</li></ul>
+      </div>
+    </div>
+
+    <!-- RESULT -->
+    <div class="card" aria-live="polite">
+      <h3><span class="step">2</span> Hasil identifikasi</h3>
+      <div id="empty" class="empty">
+        <div class="big"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r=".6" fill="currentColor"/><circle cx="15" cy="10" r=".6" fill="currentColor"/><path d="M8.5 15c1 1 2.2 1.5 3.5 1.5s2.5-.5 3.5-1.5"/></svg></div>
+        <p>Belum ada analisis.<br>Masukkan foto wajah lalu tekan <b>Analisis Kulit</b>.</p>
+      </div>
+      <div id="loading" class="loading"><div class="spinner"></div>Model CNN sedang menganalisis foto…</div>
+      <div id="errbox" class="errbox" role="alert"></div>
+      <div id="result" class="result">
+        <div class="res-head">
+          <div class="ring">
+            <svg width="100%" height="100%" viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="#f1ebe3" stroke-width="12"/>
+              <circle id="ringArc" cx="60" cy="60" r="52" fill="none" stroke="#2f6b55" stroke-width="12" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="326.7" style="transition:stroke-dashoffset .8s cubic-bezier(.2,.8,.2,1)"/></svg>
+            <div class="val"><div><span id="confVal">0%</span><small>YAKIN</small></div></div>
+          </div>
+          <div>
+            <div class="eyebrow">Jenis kulit terdeteksi</div>
+            <h4 id="resTitle">—</h4>
+            <span id="resTag" class="tag">—</span>
+          </div>
+        </div>
+        <div id="warn" class="warn">Tingkat keyakinan model rendah. Coba foto ulang dengan cahaya lebih merata dan wajah lebih dekat ke kamera.</div>
+        <div id="bars" class="bars"></div>
+        <div id="meta" class="meta"></div>
+      </div>
+    </div>
+  </div>
+
+  <section id="rec" class="rec">
+    <h3>Rekomendasi skincare untuk <span id="recTitle">—</span></h3>
+    <p class="sub">Panduan umum berdasarkan hasil identifikasi jenis kulit.</p>
+    <div class="rec-grid">
+      <div class="card"><h5>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2f6b55" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg>Ciri-ciri</h5><p id="recCiri"></p></div>
+      <div class="card"><h5>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3f8a66" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Rutinitas yang disarankan</h5><ul id="recRutin"></ul></div>
+      <div class="card"><h5>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b23a2e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>Sebaiknya dihindari</h5><ul id="recHindari"></ul></div>
+    </div>
+  </section>
+
+  <section id="history" class="history">
+    <h3>Riwayat analisis</h3>
+    <p class="sub">Tersimpan sementara di sesi ini. Klik untuk melihat kembali hasilnya.</p>
+    <div id="hist" class="hist"></div>
+  </section>
+
+  <section>
+    <h3>Tentang model</h3>
+    <p class="sub">Convolutional Neural Network yang dirancang dan dilatih dari nol, tanpa transfer learning.</p>
+    <div class="stats">
+      <div class="stat"><small>Arsitektur</small><b>Residual CNN</b></div>
+      <div class="stat"><small>Parameter</small><b id="sParams">—</b></div>
+      <div class="stat"><small>Akurasi test</small><b id="sAcc">—</b></div>
+      <div class="stat"><small>Kelas</small><b id="sClasses">—</b></div>
+    </div>
+    <div class="flow">
+      <div class="card"><span class="n">01</span><b>Prapemrosesan</b><p>Foto diubah ke RGB dan di-resize menjadi <span id="sSize">224×224</span> piksel, sama persis seperti saat training.</p></div>
+      <div class="card"><span class="n">02</span><b>Ekstraksi fitur</b><p>4 blok konvolusi residual (32→256 filter) mempelajari tekstur, kilap, dan pori kulit.</p></div>
+      <div class="card"><span class="n">03</span><b>Klasifikasi</b><p>Global Average Pooling, Dense, lalu Softmax menghasilkan probabilitas tiap jenis kulit.</p></div>
+      <div class="card"><span class="n">04</span><b>Rekomendasi</b><p>Kelas dengan probabilitas tertinggi dipetakan ke rutinitas skincare yang sesuai.</p></div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <span>Proyek Akhir Praktikum Kecerdasan Buatan · Henry Moky (2409106070) · Informatika Universitas Mulawarman</span>
+  <span>Hasil bersifat edukatif dan bukan diagnosis medis.</span>
+</footer>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const COLORS = { oily: "var(--oily)", dry: "var(--dry)", normal: "var(--normal)" };
+  const HEX = { oily: "#d29a2f", dry: "#c0674a", normal: "#3f8a66" };
+  const colorOf = (l) => COLORS[l] || "var(--other)";
+  const hexOf = (l) => HEX[l] || "#7d7a9c";
+  const MAX_MB = 10;
+
+  let current = null;      // {blob, name, url}
+  let ready = false;
+  let busy = false;
+  let stream = null;
+  const history = [];
+
+  /* ---------- status model ---------- */
+  function setStatus(kind, text) {
+    $("status").className = "status " + kind;
+    $("statusText").textContent = text;
+  }
+  async function loadInfo(attempt = 0) {
+    try {
+      const r = await fetch("/api/info", { cache: "no-store" });
+      const d = await r.json();
+      if (d.ready) {
+        ready = true;
+        setStatus("ready", "Model siap");
+        $("banner").classList.remove("show");
+        $("sParams").textContent = d.params ? d.params.toLocaleString("id-ID") : "—";
+        const acc = d.test_accuracy_tta ?? d.test_accuracy;
+        $("sAcc").textContent = acc != null ? (acc * 100).toFixed(1) + "%" : "—";
+        $("sClasses").textContent = d.classes.map((c) => c.label).join(" · ");
+        $("sSize").textContent = `${d.img_size}×${d.img_size}`;
+      } else {
+        setStatus("error", "Model belum tersedia");
+        const b = $("banner");
+        b.innerHTML = "<b>Model belum dimuat.</b> Salin <code>skin_type_cnn.keras</code> dan <code>labels.json</code> dari folder <code>PA_outputs/model/</code> ke folder <code>model/</code>, lalu jalankan ulang server.<br><small></small>";
+        b.querySelector("small").textContent = d.error || "";
+        b.classList.add("show");
+      }
+    } catch (e) {
+      setStatus("error", "Server tidak terhubung");
+      if (attempt < 5) setTimeout(() => loadInfo(attempt + 1), 2000);
+    }
+    updateButton();
+  }
+
+  /* ---------- input foto ---------- */
+  function updateButton() {
+    $("analyze").disabled = !(ready && current && !busy);
+    $("analyzeText").textContent = busy ? "Menganalisis…" : "Analisis Kulit";
+  }
+  function showPane(which) {
+    $("drop").style.display = which === "drop" ? "grid" : "none";
+    $("preview").style.display = which === "preview" ? "block" : "none";
+    $("cam").style.display = which === "cam" ? "block" : "none";
+  }
+  function setImage(blob, name) {
+    if (!blob.type.startsWith("image/")) return showError("File yang dipilih bukan gambar.");
+    if (blob.size > MAX_MB * 1024 * 1024) return showError(`Ukuran file terlalu besar (maks. ${MAX_MB} MB).`);
+    current = { blob, name: name || "foto.jpg", url: URL.createObjectURL(blob) };
+    $("previewImg").src = current.url;
+    $("previewName").textContent = current.name;
+    stopCamera();
+    showPane("preview");
+    $("errbox").style.display = "none";
+    updateButton();
+  }
+  function clearImage() {
+    current = null;
+    const mode = document.querySelector('.tab[aria-selected="true"]').dataset.mode;
+    if (mode === "camera") startCamera(); else showPane("drop");
+    updateButton();
+  }
+
+  $("drop").addEventListener("click", () => $("file").click());
+  $("drop").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); } });
+  $("file").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) setImage(f, f.name); e.target.value = ""; });
+  ["dragenter", "dragover"].forEach((ev) => $("drop").addEventListener(ev, (e) => { e.preventDefault(); $("drop").classList.add("over"); }));
+  ["dragleave", "drop"].forEach((ev) => $("drop").addEventListener(ev, (e) => { e.preventDefault(); $("drop").classList.remove("over"); }));
+  $("drop").addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) setImage(f, f.name); });
+  document.addEventListener("paste", (e) => {
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
+    if (item) setImage(item.getAsFile(), "tempelan.png");
+  });
+  $("clear").addEventListener("click", clearImage);
+
+  /* ---------- kamera ---------- */
+  document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((x) => x.setAttribute("aria-selected", x === t));
+    if (current) return;  // foto sudah dipilih: tetap tampilkan pratinjau
+    if (t.dataset.mode === "camera") startCamera(); else { stopCamera(); showPane("drop"); }
+  }));
+  async function startCamera() {
+    showPane("cam");
+    const msg = $("camMsg");
+    msg.style.display = "none";
+    $("shoot").style.display = "block";
+    if (!navigator.mediaDevices?.getUserMedia) {
+      msg.textContent = "Browser ini tidak mendukung akses kamera. Gunakan tab Upload."; msg.style.display = "grid"; $("shoot").style.display = "none"; return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false });
+      $("video").srcObject = stream;
+    } catch (e) {
+      msg.textContent = "Kamera tidak bisa diakses. Izinkan akses kamera di browser (kamera hanya berfungsi di localhost atau HTTPS).";
+      msg.style.display = "grid"; $("shoot").style.display = "none";
+    }
+  }
+  function stopCamera() {
+    if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  }
+  $("shoot").addEventListener("click", () => {
+    const v = $("video");
+    if (!v.videoWidth) return;
+    const c = document.createElement("canvas");
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    c.getContext("2d").drawImage(v, 0, 0);
+    c.toBlob((b) => b && setImage(b, "kamera.jpg"), "image/jpeg", 0.92);
+  });
+
+  /* ---------- analisis ---------- */
+  function showError(text) {
+    $("empty").style.display = "none"; $("loading").style.display = "none";
+    const e = $("errbox"); e.textContent = text; e.style.display = "block";
+  }
+  $("analyze").addEventListener("click", async () => {
+    if (!current || busy) return;
+    busy = true; updateButton();
+    $("empty").style.display = "none"; $("result").style.display = "none"; $("errbox").style.display = "none";
+    $("loading").style.display = "block";
+    const fd = new FormData();
+    fd.append("image", current.blob, current.name);
+    fd.append("tta", $("tta").checked ? "1" : "0");
+    try {
+      const r = await fetch("/api/predict", { method: "POST", body: fd });
+      let d; try { d = await r.json(); } catch { d = { ok: false, error: `Server error (${r.status}).` }; }
+      if (!r.ok || !d.ok) throw new Error(d.error || `Server error (${r.status}).`);
+      const entry = { ...d, thumb: current.url, name: current.name };
+      history.unshift(entry); if (history.length > 8) history.pop();
+      render(entry); renderHistory();
+    } catch (e) {
+      showError(e.message || "Terjadi kesalahan saat menghubungi server.");
+    } finally {
+      busy = false; $("loading").style.display = "none"; updateButton();
+    }
+  });
+
+  function render(d) {
+    $("empty").style.display = "none"; $("errbox").style.display = "none";
+    $("result").style.display = "block";
+    const col = hexOf(d.label);
+    $("resTitle").textContent = d.judul;
+    $("resTag").textContent = d.label;
+    $("resTag").style.background = col;
+    $("confVal").textContent = Math.round(d.confidence * 100) + "%";
+    const arc = $("ringArc"); arc.style.stroke = col;
+    arc.style.strokeDashoffset = 326.7;
+    requestAnimationFrame(() => requestAnimationFrame(() => { arc.style.strokeDashoffset = 326.7 * (1 - d.confidence); }));
+    $("warn").style.display = d.low_confidence ? "block" : "none";
+
+    const bars = $("bars"); bars.innerHTML = "";
+    d.probabilities.forEach((p) => {
+      const row = document.createElement("div"); row.className = "bar-row";
+      row.innerHTML = '<span class="name"></span><div class="bar"><i></i></div><span class="pct"></span>';
+      row.querySelector(".name").textContent = p.judul.replace("Kulit ", "");
+      row.querySelector(".pct").textContent = (p.prob * 100).toFixed(1) + "%";
+      const fill = row.querySelector("i"); fill.style.background = colorOf(p.label);
+      bars.appendChild(row);
+      requestAnimationFrame(() => requestAnimationFrame(() => { fill.style.width = (p.prob * 100).toFixed(1) + "%"; }));
+    });
+    const meta = $("meta"); meta.innerHTML = "";
+    [`Waktu inferensi ${d.inference_ms} ms`, `TTA ${d.tta ? "aktif" : "nonaktif"}`, `Foto ${d.image_size[0]}×${d.image_size[1]} px`]
+      .forEach((t) => { const s = document.createElement("span"); s.textContent = t; meta.appendChild(s); });
+
+    const rec = d.recommendation;
+    $("recTitle").textContent = rec.judul.toLowerCase();
+    $("recCiri").textContent = rec.ciri;
+    fillList("recRutin", rec.rutin, '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3f8a66" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>');
+    fillList("recHindari", rec.hindari, '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#b23a2e" stroke-width="2.6" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>');
+    $("rec").style.display = "block";
+  }
+  function fillList(id, items, icon) {
+    const ul = $(id); ul.innerHTML = "";
+    items.forEach((t) => { const li = document.createElement("li"); li.innerHTML = icon + "<span></span>"; li.querySelector("span").textContent = t; ul.appendChild(li); });
+  }
+  function renderHistory() {
+    const h = $("hist"); h.innerHTML = "";
+    history.forEach((e) => {
+      const b = document.createElement("button"); b.type = "button";
+      b.innerHTML = '<img alt=""><div><b></b><span></span></div>';
+      b.querySelector("img").src = e.thumb;
+      b.querySelector("b").textContent = e.judul;
+      b.querySelector("b").style.color = hexOf(e.label);
+      b.querySelector("span").textContent = `Yakin ${Math.round(e.confidence * 100)}%`;
+      b.addEventListener("click", () => { render(e); window.scrollTo({ top: 0, behavior: "smooth" }); });
+      h.appendChild(b);
+    });
+    $("history").style.display = history.length ? "block" : "none";
+  }
+
+  loadInfo();
+})();
+</script>
+</body>
+</html>
